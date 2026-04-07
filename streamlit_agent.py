@@ -1,99 +1,89 @@
+"""
+Streamlit entrypoint: news and weather agent backed by MCP tools and Azure OpenAI.
+
+Weather + keyless news use Open-Meteo MCP and Google News RSS MCP (see mcp_stack_provider.py).
+"""
+
 from __future__ import annotations
 
+import logging
 import os
-from typing import List, Tuple
-
+from typing import Any
 
 import streamlit as st
+
 try:
     from dotenv import load_dotenv
 except ModuleNotFoundError:
-    # Allow app startup in environments where python-dotenv is not installed.
-    def load_dotenv(*args, **kwargs):
+
+    def load_dotenv(*args: Any, **kwargs: Any) -> bool:
         return False
 
+
 from langchain.agents import create_agent
-from langchain_community.document_loaders import PyPDFLoader
-from langchain_core.documents import Document
-from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_core.messages import HumanMessage
+from langchain_openai import AzureChatOpenAI
 from langchain_core.tools import tool
 
-API_VERSION = "2024-08-01-preview"
+from agent_streaming import run_agent_sync
+from app_config import API_VERSION, SYSTEM_PROMPT, configure_logging, validate_env
+from conversation import format_history
+from mcp_stack_provider import MCPStackProvider
+from streamlit_ui import render_chat_history, render_sidebar
 
+logger = logging.getLogger(__name__)
 
-def format_history(messages: List[dict]) -> str:
-    # Use the last 6 turns to keep prompt size controlled.
-    recent = messages[-6:]
-    lines: List[str] = []
-    for item in recent:
-        role = item.get("role", "user")
-        content = item.get("content", "")
-        lines.append(f"{role}: {content}")
-    return "\n".join(lines)
-
-
-def validate_env() -> Tuple[bool, str]:
-    required_vars = ["OPENAI_API_KEY", "MODEL", "AZURE_ENDPOINT"]
-    missing = [name for name in required_vars if not os.getenv(name)]
-    if missing:
-        return False, f"Missing environment variables: {', '.join(missing)}"
-    return True, ""
 
 @tool
 def music_prediction(question: str) -> str:
     """Predicts music trends and answers questions about future music."""
-    print(f"Received question: {question} for music prediction tool.")
+    logger.info("music_prediction tool: %s", question)
     return "The Beatles will be resurrected by AI and will be the best rock band in 2050."
 
 
 @st.cache_resource(show_spinner=False)
-def load_agent() -> create_agent:
+def load_agent() -> Any:
+    """Build and cache the LangGraph agent (LLM + MCP tools + music tool)."""
     load_dotenv()
 
     ok, message = validate_env()
     if not ok:
         raise RuntimeError(message)
-    
+
     openai_api_key = os.getenv("OPENAI_API_KEY")
     model = os.getenv("MODEL")
     azure_endpoint = os.getenv("AZURE_ENDPOINT")
 
-    print(f"Loading AzureChatOpenAI with endpoint: {azure_endpoint}, model: {model}")
+    logger.info("Loading AzureChatOpenAI: endpoint=%s model=%s", azure_endpoint, model)
 
     if not azure_endpoint or not openai_api_key:
         raise ValueError("Azure OpenAI endpoint and key must be set in environment variables.")
+
     llm = AzureChatOpenAI(
         api_key=openai_api_key,
-        api_version="2024-08-01-preview",
+        api_version=API_VERSION,
         azure_endpoint=azure_endpoint,
         azure_deployment=model,
-        temperature=1
+        temperature=1,
     )
 
+    mcp_tools = MCPStackProvider().get_tools()
+    tools = list(mcp_tools) + [music_prediction]
 
-    tools = [music_prediction]
-    agent = create_agent(
+    return create_agent(
         model=llm,
         tools=tools,
-        system_prompt="You are a helpful assistant that provides information about news and weather. You can also predict future music trends using the music prediction tool. Always use the tool when asked about music predictions.",
+        system_prompt=SYSTEM_PROMPT,
     )
-    
-    return agent
 
-def ask_agent(agent: create_agent, question: str, history: str) -> Tuple[str, List[Tuple[Document, float]]]:
-    print("asking agent")
-    print(history)
-    print(question)
-    message = f"History:\n{history}\n\nQuestion:\n{question}\n\nAnswer:"
-    response = agent.invoke({
-        "messages": [HumanMessage(content=message)]
-    })
-    return response["messages"][-1].content, []
-                                        # f"History:\n{history}\n\nQuestion:\n{question}\n\nAnswer:")])
+
+
 
 def main() -> None:
+    """Configure logging, render the chat UI, and run one agent turn per user message."""
+    configure_logging()
+
+    render_sidebar()
+
     st.title("My daily news and weather agent")
     st.caption("This agent retrieves the latest news and weather information for a specified location.")
 
@@ -101,13 +91,15 @@ def main() -> None:
         st.session_state.messages = [
             {
                 "role": "assistant",
-                "content": "Hello. Ask me anything about the news and weather in any location. For example, you can ask 'What's the weather like in New York today?' or 'What are the latest news headlines in London?'",
+                "content": (
+                    "Hello. Ask me anything about the news and weather in any location. "
+                    "For example, you can ask 'What's the weather like in New York today?' "
+                    "or 'What are the latest news headlines in London?'"
+                ),
             }
         ]
 
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+    render_chat_history()
 
     user_input = st.chat_input("Type your question...")
     if not user_input:
@@ -118,18 +110,26 @@ def main() -> None:
         st.markdown(user_input)
 
     with st.chat_message("assistant"):
-        with st.spinner("Searching information and generating answer..."):
-            try:
-                agent = load_agent()
-                history_text = format_history(st.session_state.messages)
-                answer, retrieved = ask_agent(agent, user_input, history_text)
-            except Exception as exc:
-                st.error(f"Error: {exc}")
-                return
-
-        st.markdown(answer)
+        stream_placeholder = st.empty()
+        try:
+            agent = load_agent()
+            history_text = format_history(st.session_state.messages)
+            with st.status("Running the agent (tools may take a few seconds)…", expanded=True) as status:
+                status.write("Starting…")
+                answer = run_agent_sync(
+                    agent,
+                    history_text,
+                    user_input,
+                    status_container=status,
+                    stream_placeholder=stream_placeholder,
+                )
+        except Exception as exc:
+            logger.exception("Agent run failed")
+            st.error(f"Error: {exc}")
+            return
 
     st.session_state.messages.append({"role": "assistant", "content": answer})
+
 
 if __name__ == "__main__":
     main()
