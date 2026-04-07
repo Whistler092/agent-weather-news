@@ -21,7 +21,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
 
-from open_meteo_mcp_provider import OpenMeteoMCPProvider
+from mcp_stack_provider import MCPStackProvider
 
 API_VERSION = "2024-08-01-preview"
 
@@ -50,7 +50,7 @@ def validate_env() -> Tuple[bool, str]:
 #At least one evaluation metric is defined, evaluated, and demonstrated (quantitative or qualitative measure used to assess the performance, quality, and safety of generative model outputs). 
 #You need to have at least small evaluation data set and for at least one criterion.
 
-# Weather and related data come from the Open-Meteo MCP server via OpenMeteoMCPProvider (see open_meteo_mcp_provider.py).
+# Weather + keyless news: Open-Meteo MCP and Google News RSS MCP (see mcp_stack_provider.py).
 
 @tool
 def music_prediction(question: str) -> str:
@@ -83,8 +83,8 @@ def load_agent() -> create_agent:
         temperature=1
     )
 
-    weather_tools = OpenMeteoMCPProvider().get_tools()
-    tools = list(weather_tools) + [music_prediction]
+    mcp_tools = MCPStackProvider().get_tools()
+    tools = list(mcp_tools) + [music_prediction]
     agent = create_agent(
         model=llm,
         tools=tools,
@@ -92,8 +92,12 @@ def load_agent() -> create_agent:
             "You are a helpful assistant for news and weather. "
             "For current weather, forecasts, air quality, or time/timezone questions, use the Open-Meteo MCP tools "
             "(names like open_meteo_get_current_weather). Pass the city in English as the tool expects (e.g. city parameter). "
+            "For latest news, headlines, or topic feeds, use the Google News MCP tools "
+            "(e.g. google_news_google_news_search, google_news_google_news_topics). "
+            "Those tools default to Japanese; for English users pass hl=\"en\" and set gl to a region code when helpful "
+            "(e.g. US, GB). "
             "For hypothetical or future music questions, use the music_prediction tool. "
-            "Always use the appropriate tool when the user asks for weather, air quality, or music predictions rather than guessing."
+            "Always use the appropriate tool for weather, news, air quality, or music rather than guessing."
         ),
     )
     

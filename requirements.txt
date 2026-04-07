@@ -6,3 +6,4 @@ langchain-core
 langchain-openai
 open-meteo-mcp
 langchain-mcp-adapters
+mcp-server-google-news
