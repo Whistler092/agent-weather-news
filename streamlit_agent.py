@@ -93,8 +93,8 @@ def main() -> None:
                 "role": "assistant",
                 "content": (
                     "Hello. Ask me anything about the news and weather in any location. "
-                    "For example, you can ask 'What's the weather like in New York today?' "
-                    "or 'What are the latest news headlines in London?'"
+                    "For example, you can ask, 'What's the weather like in Cali, Colombia, today?' "
+                    "or 'What are the latest news headlines in Colombia?'"
                 ),
             }
         ]
