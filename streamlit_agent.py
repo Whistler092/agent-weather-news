@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import List, Tuple
 
@@ -19,6 +20,8 @@ from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
+
+from open_meteo_mcp_provider import OpenMeteoMCPProvider
 
 API_VERSION = "2024-08-01-preview"
 
@@ -40,6 +43,14 @@ def validate_env() -> Tuple[bool, str]:
     if missing:
         return False, f"Missing environment variables: {', '.join(missing)}"
     return True, ""
+
+# Create an application, that could answer questions about current weather and latest news with Python + Streamlit, 
+#    using Agent orchestrators 
+#        and MCP servers for Open‑Meteo and TheNews API / GNews.io / NewsAPI without API Key (choose one news web-site mcp).
+#At least one evaluation metric is defined, evaluated, and demonstrated (quantitative or qualitative measure used to assess the performance, quality, and safety of generative model outputs). 
+#You need to have at least small evaluation data set and for at least one criterion.
+
+# Weather and related data come from the Open-Meteo MCP server via OpenMeteoMCPProvider (see open_meteo_mcp_provider.py).
 
 @tool
 def music_prediction(question: str) -> str:
@@ -72,12 +83,18 @@ def load_agent() -> create_agent:
         temperature=1
     )
 
-
-    tools = [music_prediction]
+    weather_tools = OpenMeteoMCPProvider().get_tools()
+    tools = list(weather_tools) + [music_prediction]
     agent = create_agent(
         model=llm,
         tools=tools,
-        system_prompt="You are a helpful assistant that provides information about news and weather. You can also predict future music trends using the music prediction tool. Always use the tool when asked about music predictions.",
+        system_prompt=(
+            "You are a helpful assistant for news and weather. "
+            "For current weather, forecasts, air quality, or time/timezone questions, use the Open-Meteo MCP tools "
+            "(names like open_meteo_get_current_weather). Pass the city in English as the tool expects (e.g. city parameter). "
+            "For hypothetical or future music questions, use the music_prediction tool. "
+            "Always use the appropriate tool when the user asks for weather, air quality, or music predictions rather than guessing."
+        ),
     )
     
     return agent
@@ -87,9 +104,12 @@ def ask_agent(agent: create_agent, question: str, history: str) -> Tuple[str, Li
     print(history)
     print(question)
     message = f"History:\n{history}\n\nQuestion:\n{question}\n\nAnswer:"
-    response = agent.invoke({
-        "messages": [HumanMessage(content=message)]
-    })
+
+    async def _run() -> dict:
+        # MCP-backed tools from langchain-mcp-adapters are async-only; use ainvoke, not invoke.
+        return await agent.ainvoke({"messages": [HumanMessage(content=message)]})
+
+    response = asyncio.run(_run())
     return response["messages"][-1].content, []
                                         # f"History:\n{history}\n\nQuestion:\n{question}\n\nAnswer:")])
 
