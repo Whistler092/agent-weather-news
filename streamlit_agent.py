@@ -28,6 +28,7 @@ from agent_streaming import run_agent_sync
 from app_config import API_VERSION, SYSTEM_PROMPT, configure_logging, validate_env
 from conversation import format_history
 from mcp_stack_provider import MCPStackProvider
+from security_controls import safe_user_error, validate_user_prompt
 from streamlit_ui import render_chat_history, render_sidebar
 
 logger = logging.getLogger(__name__)
@@ -105,6 +106,12 @@ def main() -> None:
     if not user_input:
         return
 
+    is_valid, validation_message = validate_user_prompt(user_input)
+    if not is_valid:
+        st.warning(validation_message)
+        logger.warning("Blocked unsafe or oversized user input")
+        return
+
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.markdown(user_input)
@@ -125,7 +132,8 @@ def main() -> None:
                 )
         except Exception as exc:
             logger.exception("Agent run failed")
-            st.error(f"Error: {exc}")
+            logger.debug("Agent failure details: %s", exc)
+            st.error(safe_user_error())
             return
 
     st.session_state.messages.append({"role": "assistant", "content": answer})

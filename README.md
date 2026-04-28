@@ -27,15 +27,43 @@ User (Streamlit) → LangGraph agent (Azure Chat) → Tools
 
 ## Setup
 
-1. Clone or copy this repository and create a virtual environment (recommended).
+1. Clone or copy this repository.
 
-2. Install dependencies:
+2. Create a virtual environment (recommended):
+
+   **Windows (PowerShell)**
+
+   ```powershell
+   python -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   ```
+
+   If activation is blocked by execution policy, run this once and try again:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+   ```
+
+   **macOS/Linux**
+
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   ```
+
+3. Install dependencies:
 
    ```bash
    pip install -r requirements.txt
    ```
 
-3. Configure environment variables (see below). You can use a `.env` file in the project root; the app loads it via `python-dotenv`.
+4. Configure environment variables (see below). You can use a `.env` file in the project root; the app loads it via `python-dotenv`.
+
+5. (Optional) Deactivate the environment when you are done:
+
+   ```bash
+   deactivate
+   ```
 
 ## Environment variables
 
